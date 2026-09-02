@@ -10,9 +10,10 @@ It has a GUI and you can play Sudoku puzzles with custom difficulty.
 ```
 make
 ```
-If you don't have make installed run directly 
+If you don't have make installed run directly from `gui_sudoku/`
 ```
-gcc src/main.c src/sudoku_gui.c -o main -mwindows; ./main.exe
+gcc -I include src/main.c src/sudoku.c src/sudoku_gui.c -o main.exe -mwindows
+./main.exe
 ```
 
 # Screenshots

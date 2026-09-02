@@ -1,237 +1,366 @@
-#include "../include/sudoku_gui.h"
-#include "../include/sudoku_game.h"
+#include <stdio.h>
+#include <stdlib.h>
 
-/*Global constant for the grid generation etc*/
+#include "sudoku_gui.h"
 
-/*Function to draw the Sudoku Grid*/
-
-void drawSudokuGrid(HDC hdc, struct PointerStruct *p1)
+/* Combine the fixed givens and the user's entries into one board. */
+static void computeBoard(const struct Game *s1, int board[SUDOKU_DIM][SUDOKU_DIM])
 {
-    int val = p1->g1->gridCoordinates.left + 1;
-
-    /*Draw rectangles to give dark border*/
-    Rectangle(hdc, val, val, val * 9.65, val * 4 - 9);
-    Rectangle(hdc, val, val * 3.80, val * 9.65, val * 4 - 9 + val * 3 - 4);
-    Rectangle(hdc, val, val * 6.70, val * 9.65, val * 4 - 9 + val * 5.80);
-    RECT rect = p1->g1->gridCoordinates;
-    /*Create a custom brush*/
-    HBRUSH hBrush = CreateSolidBrush(RGB(0, 0, 0));
-
-    /*Initialize the offfset */
-    int value1 = OFFSET_GRID_COORDINATES;
-    int value2 = OFFSET_GRID_COORDINATES;
-    /*Grid genenration logic starts from here */
-    for (int i = 0; i < SUDOKU_DIMENSION; i++)
+    for (int r = 0; r < SUDOKU_DIM; r++)
     {
-        for (int j = 1; j <= SUDOKU_DIMENSION; j++)
+        for (int c = 0; c < SUDOKU_DIM; c++)
         {
-            /*Draw custom square using rect*/
-            FrameRect(hdc, &rect, hBrush);
-            /*If it the end of the subgrid make it give a border*/
-            if (j % 3 == 0)
-            {
-                rect.left = rect.left + value1 + 1;
-                rect.right = rect.right + value1 + 1;
-                continue;
-            }
-            rect.left = rect.left + value1;
-            rect.right = rect.right + value1;
-        }
-
-        rect.top = value1 * 2 + 1;
-        rect.bottom = value2 + value1 * 2;
-        rect.left = value1 + 1;
-        rect.right = value1 * 2 + 2;
-
-        value2 += value1;
-    }
-    /*Create a custom font*/
-    HFONT font = CreateFont(24, 0, 0, 15, FW_HEAVY, 0, 0, 0, 0, 0, 0, 0, 0, CELL_FONT);
-    /*Select the font*/
-    SelectObject(hdc, font);
-    /*initialize the offset to variable so we can change it later*/
-    const int offset = OFFSET_GRID_COORDINATES;
-    for (int i = 0; i < SUDOKU_DIMENSION; i++)
-    {
-        for (int j = 0; j < SUDOKU_DIMENSION; j++)
-        {
-            /*If its zero then make text color blue*/
-            if (p1->s1->zeroGrid[i][j] == 0)
-            {
-                SetTextColor(hdc, COLOR_BLUE);
-            }
-            char buffer[10] = "";
-            /*Function convert int to char*/
-            sprintf(buffer, "%d", p1->s1->sudokuGrid[i][j]);
-            /*Fill the grid*/
-            TextOut(hdc, p1->s1->positions[0] + (offset * j), p1->s1->positions[1] + (offset * i), buffer, 1);
-            SetTextColor(hdc, COLOR_BLACK);
+            board[r][c] = s1->puzzle[r][c] ? s1->puzzle[r][c] : s1->user[r][c];
         }
     }
 }
 
-/*Function to ensure that user have entered correct input*/
-int validateUserInput(HWND hwnd, HWND textbox, int currentTextboxID, struct Game *s1)
+/* True when every cell is filled and no rule is broken. */
+static bool boardFullValid(const struct Game *s1)
 {
-    char buffer[100];
-    /*Get the entered text and store it to a buffer*/
-    GetWindowText(textbox, buffer, sizeof(buffer));
-    /*If the text len is 0 dont validate it */
-    if (GetWindowTextLength(textbox) == 0)
+    int board[SUDOKU_DIM][SUDOKU_DIM];
+    computeBoard(s1, board);
+    for (int r = 0; r < SUDOKU_DIM; r++)
     {
-        return TRUE;
+        for (int c = 0; c < SUDOKU_DIM; c++)
+        {
+            if (board[r][c] == 0)
+            {
+                return false;
+            }
+        }
     }
-    /*If its not a number or 0 then tell the user*/
-    if (!isdigit((unsigned char)buffer[0]) || buffer[0] == '0')
+    return !sudoku_has_conflict(board);
+}
+
+static void drawGridLines(HDC hdc, int gx, int gy, int cell)
+{
+    int size = SUDOKU_DIM * cell;
+    HPEN thin = CreatePen(PS_SOLID, 1, COLOR_LINE_THIN);
+    HPEN thick = CreatePen(PS_SOLID, 3, COLOR_LINE_THICK);
+    for (int i = 0; i <= SUDOKU_DIM; i++)
     {
-        /*Clear texbox text*/
-        SetWindowText(textbox, "");
-        MessageBox(textbox, "Input should only be a number , Please enter valid input again", "Error", MB_OK | MB_ICONERROR);
+        HPEN pen = (i % 3 == 0) ? thick : thin;
+        HPEN old = SelectObject(hdc, pen);
+        MoveToEx(hdc, gx + i * cell, gy, NULL);
+        LineTo(hdc, gx + i * cell, gy + size);
+        MoveToEx(hdc, gx, gy + i * cell, NULL);
+        LineTo(hdc, gx + size, gy + i * cell);
+        SelectObject(hdc, old);
     }
-    /*If its a number*/
+    DeleteObject(thin);
+    DeleteObject(thick);
+}
+
+/* Pencil marks: one small dot per digit that still fits in this cell. */
+static void drawPencilDots(HDC hdc, const RECT *cr,
+                           const int board[SUDOKU_DIM][SUDOKU_DIM],
+                           int r, int c)
+{
+    int subW = (cr->right - cr->left) / 3;
+    int subH = (cr->bottom - cr->top) / 3;
+    HBRUSH dot = CreateSolidBrush(COLOR_PENCIL);
+    HPEN oldPen = SelectObject(hdc, GetStockObject(NULL_PEN));
+    HBRUSH oldBrush = SelectObject(hdc, dot);
+    for (int d = 1; d <= SUDOKU_DIM; d++)
+    {
+        if (!sudoku_is_valid(board, r, c, d))
+        {
+            continue;
+        }
+        int dr = (d - 1) / 3;
+        int dc = (d - 1) % 3;
+        int cx = cr->left + dc * subW + subW / 2;
+        int cy = cr->top + dr * subH + subH / 2;
+        Ellipse(hdc, cx - 2, cy - 2, cx + 3, cy + 3);
+    }
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(dot);
+}
+
+void drawBoard(HDC hdc, struct Game *s1, struct Gui *g1)
+{
+    int board[SUDOKU_DIM][SUDOKU_DIM];
+    computeBoard(s1, board);
+    int cell = g1->cell;
+    int gx = g1->gridX0;
+    int gy = g1->gridY0;
+
+    HBRUSH bg = CreateSolidBrush(COLOR_WHITE);
+    RECT full = { gx, gy, gx + SUDOKU_DIM * cell, gy + SUDOKU_DIM * cell };
+    FillRect(hdc, &full, bg);
+    DeleteObject(bg);
+
+    for (int r = 0; r < SUDOKU_DIM; r++)
+    {
+        for (int c = 0; c < SUDOKU_DIM; c++)
+        {
+            RECT cr = { gx + c * cell, gy + r * cell,
+                        gx + (c + 1) * cell, gy + (r + 1) * cell };
+
+            if (r == s1->selRow && c == s1->selCol)
+            {
+                HBRUSH sel = CreateSolidBrush(COLOR_SEL_FILL);
+                FillRect(hdc, &cr, sel);
+                DeleteObject(sel);
+            }
+
+            char buf[4];
+            if (s1->puzzle[r][c])
+            {
+                HFONT old = SelectObject(hdc, g1->fontCell);
+                SetTextColor(hdc, COLOR_GIVEN);
+                sprintf(buf, "%d", s1->puzzle[r][c]);
+                DrawText(hdc, buf, -1, &cr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                SelectObject(hdc, old);
+            }
+            else if (s1->user[r][c])
+            {
+                HFONT old = SelectObject(hdc, g1->fontCell);
+                SetTextColor(hdc, sudoku_cell_conflict(board, r, c) ? COLOR_CONFLICT : COLOR_USER);
+                sprintf(buf, "%d", s1->user[r][c]);
+                DrawText(hdc, buf, -1, &cr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                SelectObject(hdc, old);
+            }
+            else
+            {
+                drawPencilDots(hdc, &cr, board, r, c);
+            }
+        }
+    }
+
+    drawGridLines(hdc, gx, gy, cell);
+
+    if (s1->selRow >= 0 && s1->selCol >= 0)
+    {
+        RECT cr = { gx + s1->selCol * cell + 1, gy + s1->selRow * cell + 1,
+                    gx + (s1->selCol + 1) * cell - 1, gy + (s1->selRow + 1) * cell - 1 };
+        HPEN pen = CreatePen(PS_SOLID, 2, COLOR_SEL_BORDER);
+        HPEN oldPen = SelectObject(hdc, pen);
+        HBRUSH oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        Rectangle(hdc, cr.left, cr.top, cr.right, cr.bottom);
+        SelectObject(hdc, oldPen);
+        SelectObject(hdc, oldBrush);
+        DeleteObject(pen);
+    }
+}
+
+void drawStatus(HDC hdc, struct Game *s1, struct Gui *g1)
+{
+    SetBkMode(hdc, TRANSPARENT);
+
+    const char *labels[] = LEVEL_LABELS;
+    const char *lvl = (s1->level >= 1 && s1->level <= LEVEL_COUNT)
+                          ? labels[s1->level - 1] : "";
+    char line[96];
+    if (s1->solved)
+    {
+        sprintf(line, "Solved!   Score: %ld   (Game > New to play again)", s1->score);
+        SetTextColor(hdc, COLOR_SOLVED);
+    }
     else
     {
-        int row = 0;
-        int col = 0;
-        int idCount = 0;
-        /*Logic to get the row and col/where the user typed input*/
-        /*Used while loop through the get the row and col*/
-        while (row != SUDOKU_DIMENSION)
+        sprintf(line, "Level: %s    Score: %ld    click a cell, type 1-9", lvl, s1->score);
+        SetTextColor(hdc, COLOR_STATUS);
+    }
+    HFONT old = SelectObject(hdc, g1->fontStatus);
+    RECT sr = { 0, 0, WIN_W, g1->gridY0 };
+    DrawText(hdc, line, -1, &sr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(hdc, old);
+}
+
+void setupMenu(HWND hwnd, struct PointerStruct *p1)
+{
+    HMENU menu = CreateMenu();
+    HMENU game = CreatePopupMenu();
+    AppendMenu(game, MF_STRING, IDM_NEW_EASY, "New - Easy");
+    AppendMenu(game, MF_STRING, IDM_NEW_MEDIUM, "New - Medium");
+    AppendMenu(game, MF_STRING, IDM_NEW_HARD, "New - Hard");
+    AppendMenu(menu, MF_POPUP, (UINT_PTR)game, "Game");
+    SetMenu(hwnd, menu);
+    p1->g1->menu = menu;
+}
+
+/* Grayscale anti-aliased fonts: no ClearType subpixel fringing, so text
+ * stays crisp on any background colour. */
+static HFONT makeFont(int height, int weight, const char *face)
+{
+    LOGFONT lf = {0};
+    lf.lfHeight = height;
+    lf.lfWeight = weight;
+    lf.lfQuality = ANTIALIASED_QUALITY;
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lstrcpynA(lf.lfFaceName, face, LF_FACESIZE);
+    return CreateFontIndirectA(&lf);
+}
+
+void createFonts(struct Gui *g1)
+{
+    g1->fontCell = makeFont(24, FW_BOLD, CELL_FONT);
+    g1->fontStatus = makeFont(16, FW_NORMAL, TITLE_FONT);
+}
+
+void deleteFonts(struct Gui *g1)
+{
+    if (g1->fontCell)
+        DeleteObject(g1->fontCell);
+    if (g1->fontStatus)
+        DeleteObject(g1->fontStatus);
+}
+
+void newGame(struct Game *s1, struct Gui *g1, int level)
+{
+    (void)g1;
+    s1->level = level;
+    s1->score = 0;
+    s1->solved = false;
+    s1->selRow = -1;
+    s1->selCol = -1;
+    for (int r = 0; r < SUDOKU_DIM; r++)
+    {
+        for (int c = 0; c < SUDOKU_DIM; c++)
         {
-            /*If its a zero then increment idCount */
-            if (s1->zeroGrid[row][col] == 0)
-            {
-                idCount++;
-            }
-            /*Check if idCount is equal to texbox idea(texbox id start from zero thus we have to increment 1)*/
-            if (idCount == currentTextboxID + 1)
-            {
-                break;
-            }
-            col++;
-            if (col == SUDOKU_DIMENSION)
-            {
-                row++;
-                col = 0;
-            }
-        }
-        /*Convert int to char*/
-        int cell = atoi(buffer);
-        /*check if its and valid placement,variable to hold the boolean value*/
-        int check = checkRows(cell, row, col, s1->sudokuGrid) && checkCols(cell, row, col, s1->sudokuGrid) && checkSubGrid(cell, row, col, s1->sudokuGrid);
-        /*If the check is 1 or its dose not match to the solved grid then tell the user*/
-        if (check || s1->sudokuGrid[row][col] != cell)
-        {
-            /*Clear the texbox text*/
-            SetWindowText(textbox, "");
-            /*Increment the mistakes count*/
-            s1->mistakes++;
-            /*Redraw the window so mistakes can be updated*/
-            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE);
-            /*Tell the user it's wrong*/
-            MessageBox(textbox, "Invalid placement, Try another number", "Error!", MB_OK | MB_ICONERROR);
-            /*if mistakes are 5 then tell the user and end the game*/
-            if (s1->mistakes == 5)
-            {
-                MessageBox(hwnd, "Max limit of Mistakes Reached(5)!", "msg", MB_OK | MB_ICONASTERISK);
-                PostQuitMessage(0);
-            }
-        }
-        /*If its correct*/
-        else
-        {
-            /*Destory the texbox , since our text is behind the texbox it will display the number */
-            DestroyWindow(textbox);
-            /*Increment score*/
-            s1->score += 70;
-            /*Redraw the window so score can be updated */
-            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE);
-            /*Decrement the empty cells count*/
-            s1->emptyCells--;
-            /*If the empty cells are none then its means the user has filled the whole grid */
-            if (!s1->emptyCells)
-            {
-                /*Congratulate the user and exit */
-                MessageBox(hwnd, "Congratulations, You solved the Sudoku puzzle!", "Message ", MB_OK | MB_ICONINFORMATION);
-                PostQuitMessage(0);
-            }
+            s1->user[r][c] = 0;
         }
     }
-    return 0;
-}
-/*Function to create the texbox*/
-void createSudokuTextbox(HWND hwnd, struct Game *s1)
-{
-    int id = 0;
-    for (int i = 0; i < SUDOKU_DIMENSION; i++)
+
+    sudoku_generate(level, s1->puzzle, s1->solution);
+
+    bool found = false;
+    for (int r = 0; r < SUDOKU_DIM && !found; r++)
     {
-        for (int j = 0; j < SUDOKU_DIMENSION; j++)
+        for (int c = 0; c < SUDOKU_DIM && !found; c++)
         {
-            /*If the grid is zero then only create the texbox on the specified locations*/
-            if (s1->zeroGrid[i][j] == 0)
+            if (s1->puzzle[r][c] == 0)
             {
-                CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE,
-                             s1->positions[0] + 1 + (44 * j), s1->positions[1] + 1.5 + (44 * i),
-                             15, 20, hwnd, (HMENU)(INT_PTR)id, 0, 0);
-                id++;
+                s1->selRow = r;
+                s1->selCol = c;
+                found = true;
             }
         }
     }
-    /*assign id to totalEmptyCells*/
-    s1->totalEmptyCells = id;
-}
-/*Function to display user game data*/
-int DisplayUserGameData(HDC hdc, struct PointerStruct *p1)
-{
-    char scoreMsg[20];
-    char mistakesMsg[20];
-    /*Change the Bk color to our main color so it dosent show white backround behind */
-    SetBkColor(hdc, mainBackgroundColorHex);
-    /*Convert int score to character*/
-
-    sprintf(scoreMsg, "Score: %d", p1->s1->score);
-    /*Display the score*/
-    TextOut(hdc, p1->g1->gridCoordinates.left, p1->g1->gridCoordinates.left - 25, scoreMsg, strlen(scoreMsg));
-    /*Set color red to say mistakes*/
-    SetTextColor(hdc, COLOR_RED);
-    /*Convert int mistakes to character*/
-    sprintf(mistakesMsg, "Mistakes: %d/5", p1->s1->mistakes);
-    /*Display the mistakes*/
-    TextOut(hdc, p1->g1->gridCoordinates.right * 4 - 5, p1->g1->gridCoordinates.left - 25, mistakesMsg, strlen(mistakesMsg));
-
-    SetBkColor(hdc, COLOR_WHITE);
-    SetTextColor(hdc, COLOR_BLACK);
-    return 0;
 }
 
-/*Function to create difficulty buttons*/
-void createDifficultyButtons(HWND hwnd, HWND *difficultyButtons, struct PointerStruct *p1)
+void onGridClick(HWND hwnd, struct Game *s1, struct Gui *g1, LPARAM lp)
 {
-    /*Create  font*/
-    HFONT font = CreateFont(24, 0, 0, 0, FW_BOLD, 0, 0, 0, 0, 0, 0, 0, 0, TITLE_FONT);
-
-    char *level[] = LEVEL_LABELS;
-    /*create the buttons */
-    for (int i = 0; i < LEVEL_COUNT; i++)
+    int x = LOWORD(lp) - g1->gridX0;
+    int y = HIWORD(lp) - g1->gridY0;
+    if (x < 0 || y < 0 || x >= SUDOKU_DIM * g1->cell || y >= SUDOKU_DIM * g1->cell)
     {
-        difficultyButtons[i] = CreateWindow("BUTTON",
-                                            level[i], WS_CHILD | WS_VISIBLE, p1->s1->positions[2] - 10,
-                                            p1->s1->positions[3] + (i * 80), p1->g1->Rect.right - 100, p1->g1->Rect.right - 250, hwnd, (HMENU)(INT_PTR)(i + 1), NULL, NULL);
-        /*Message to set the font*/
-        SendMessage(difficultyButtons[i], WM_SETFONT, (WPARAM)font, TRUE);
+        s1->selRow = -1;
+        s1->selCol = -1;
+        InvalidateRect(hwnd, NULL, TRUE);
+        return;
     }
+    s1->selCol = x / g1->cell;
+    s1->selRow = y / g1->cell;
+    InvalidateRect(hwnd, NULL, TRUE);
 }
-/*Function to handle difficulty buttons*/
-void handleDifficultyButtons(int buttonID, HWND *difficultyButtons, struct Game *s1)
+
+void onKeyPress(HWND hwnd, struct Game *s1, struct Gui *g1, WPARAM key)
 {
-    /*If button id is in the range of LEVEL_COUNT count then fill with zero according to selected levels*/
-    if (buttonID <= LEVEL_COUNT)
+    (void)g1;
+    int r = s1->selRow;
+    int c = s1->selCol;
+
+    if (r < 0)
     {
-        fillWithZero(buttonID * 3, s1);
+        bool found = false;
+        for (int i = 0; i < SUDOKU_DIM && !found; i++)
+        {
+            for (int j = 0; j < SUDOKU_DIM && !found; j++)
+            {
+                if (s1->puzzle[i][j] == 0)
+                {
+                    r = i;
+                    c = j;
+                    found = true;
+                }
+            }
+        }
+        if (!found)
+        {
+            r = 0;
+            c = 0;
+        }
+        s1->selRow = r;
+        s1->selCol = c;
     }
-    /*Destory the buttons*/
-    for (int i = 0; i < LEVEL_COUNT; i++)
+
+    int nr = r;
+    int nc = c;
+    switch (key)
     {
-        DestroyWindow(difficultyButtons[i]);
+    case VK_UP:
+        if (r > 0)
+            nr = r - 1;
+        break;
+    case VK_DOWN:
+        if (r < SUDOKU_DIM - 1)
+            nr = r + 1;
+        break;
+    case VK_LEFT:
+        if (c > 0)
+            nc = c - 1;
+        break;
+    case VK_RIGHT:
+        if (c < SUDOKU_DIM - 1)
+            nc = c + 1;
+        break;
+    default:
+        break;
     }
+
+    if (nr != r || nc != c)
+    {
+        s1->selRow = nr;
+        s1->selCol = nc;
+        InvalidateRect(hwnd, NULL, TRUE);
+        return;
+    }
+
+    if (s1->solved)
+    {
+        return;
+    }
+    if (s1->puzzle[r][c] != 0)
+    {
+        return; /* givens are fixed */
+    }
+
+    int newVal = 0;
+    if (key >= '1' && key <= '9')
+    {
+        newVal = key - '0';
+    }
+    else if (key == '0' || key == VK_BACK || key == VK_DELETE || key == VK_SPACE)
+    {
+        newVal = 0;
+    }
+    else
+    {
+        return;
+    }
+
+    int old = s1->user[r][c];
+    if (newVal == old)
+    {
+        return;
+    }
+
+    if (old == 0 && newVal != 0)
+    {
+        s1->score += 10;
+    }
+    else if (old != 0 && newVal == 0)
+    {
+        s1->score -= 10;
+        if (s1->score < 0)
+            s1->score = 0;
+    }
+
+    s1->user[r][c] = newVal;
+    s1->solved = boardFullValid(s1);
+    InvalidateRect(hwnd, NULL, TRUE);
 }

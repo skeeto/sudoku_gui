@@ -1,204 +1,170 @@
-/*----------------------------------------------------------
-Sudoku GUI in c lang with win32
-HWND : handle to a window/ HWND identifies the actual instance of some Window Class
-WPARAM  : use it to pass things like handles and integers
-LPARAM  : use it  pass pointers.
-Msg :  message information from a thread's message queue
-RECT : RECT struct that store the left,right,bottom and top value to pass it to rectangle drawing function
-PAINTSTRUCT : PAINTSTRUCT structure contains information for window
-*/
+#include <time.h>
 
-#include "../include/sudoku_gui.h"
-#include "../include/sudoku_game.h"
-/*
-Function:LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
-PURPOSE: Processes messages for the main window
-Messages
+#include "sudoku_gui.h"
+#include "sudoku.h"
 
-*   FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
-*
-*   WM_COMMAND  - process the window menu
-*   WM_PAINT    - post when window requests to Paint the main window
-*   WM_CLOSE    - post when  window requests quit message
-*   WM_CREATE   - post when window requests that a window be created
-*
-*
-
-*/
-
+/* Message handler for the single main window. The pointer struct created
+ * in main() is attached here so every handler can reach the game + gui. */
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-    /*Assgin a struct pointer to save user data*/
-    struct PointerStruct *p1 = (struct PointerStruct *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    struct PointerStruct *p1 =
+        (struct PointerStruct *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+
     switch (msg)
     {
-    /*Close the window and end the process*/
-    case WM_CLOSE:
+    case WM_CREATE:
     {
-        PostQuitMessage(0);
+        CREATESTRUCT *cs = (CREATESTRUCT *)lp;
+        struct PointerStruct *pp = (struct PointerStruct *)cs->lpCreateParams;
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)pp);
+
+        createFonts(pp->g1);
+        setupMenu(hwnd, pp);
+
+        HICON hicon = (HICON)LoadImage(NULL, iconFilePath, IMAGE_ICON,
+                                       500, 500, LR_LOADFROMFILE);
+        if (hicon)
+        {
+            SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hicon);
+        }
+
+        newGame(pp->s1, pp->g1, 1); /* start on Easy */
         return 0;
     }
+
+    case WM_ERASEBKGND:
+        /* The background is drawn in WM_PAINT (double buffered); suppress
+           the default erase so the window never flashes blank. */
+        return 1;
+
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
-        /*The BeginPaint function prepares the specified window for painting and fills a PAINTSTRUCT structure with information about the painting*/
-        OutputDebugString("hey");
         HDC hdc = BeginPaint(hwnd, &ps);
-        /* if its the game has stared then display the title*/
-        if (p1->s1->isStart)
-        {
-            /*Create a font with custom configurations*/
-            HFONT font = CreateFont(50, 0, 0, 0, FW_BOLD, 0, 0, 0, 0, 0, 0, 0, 0, TITLE_FONT);
-            /*Select the font*/
-            SelectObject(hdc, font);
-            /*Change the Bk color to our main color so it dosent show white backround behind */
-            SetBkColor(hdc, mainBackgroundColorHex);
-            /*display the title*/
-            TextOut(hdc, p1->s1->positions[2] + 20, p1->s1->positions[3] - 80, "Sudoku", 6);
-            /*Delete the font */
-            DeleteObject(font);
-            /*EndPaint function marks the end of painting of the window*/
-            EndPaint(hwnd, &ps);
-            /*exit*/
-            return 0;
-        }
-        /*Fuction to display user game data*/
-        DisplayUserGameData(hdc, p1);
-        /*Fuction Draw the Sudoku grid*/
-        drawSudokuGrid(hdc, p1);
+
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int w = rc.right - rc.left;
+        int h = rc.bottom - rc.top;
+
+        /* Render to an offscreen bitmap, then blit it in one shot, so the
+           finished frame appears atomically (no mid-draw flicker). */
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBmp = CreateCompatibleBitmap(hdc, w, h);
+        HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+
+        HBRUSH bg = CreateSolidBrush(COLOR_BG);
+        FillRect(memDC, &rc, bg);
+        DeleteObject(bg);
+
+        drawBoard(memDC, p1->s1, p1->g1);
+        drawStatus(memDC, p1->s1, p1->g1);
+
+        BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
+
+        SelectObject(memDC, oldBmp);
+        DeleteObject(memBmp);
+        DeleteDC(memDC);
+
         EndPaint(hwnd, &ps);
-        return 0;
-    }
-        /*assign buttons handles/hwnd  */
-        static HWND difficultyButtons[3];
-    case WM_CREATE:
-    {
-        /*Handle to the icon*/
-        HICON hicon;
-        /*assign the hicon to the icon we want the window to have */
-        hicon = (HICON)LoadImage(NULL, TEXT(iconFilePath), IMAGE_ICON, 500, 500, LR_LOADFROMFILE);
-        /*send the message to set the icon*/
-        SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hicon);
-        /*retrive the struct we passed to createWindowEx*/
-        CREATESTRUCT *cs = (CREATESTRUCT *)lp;
-        struct PointerStruct *p1 = (struct PointerStruct *)cs->lpCreateParams;
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)p1);
-
-        if (p1->s1->isStart)
-        {
-            /*Function to create the difficulty buttons*/
-            createDifficultyButtons(hwnd, difficultyButtons, p1);
-        }
-
         return 0;
     }
 
     case WM_COMMAND:
     {
-        /*Get the button id from the wparam*/
-        int buttonID = LOWORD(wp);
-
-        if (p1->s1->isStart)
+        int id = LOWORD(wp);
+        switch (id)
         {
-            /*Handle the difficulty buttons*/
-            handleDifficultyButtons(buttonID, difficultyButtons, p1->s1);
-            /*Create the Sudoku texboxes*/
-            createSudokuTextbox(hwnd, p1->s1);
-            /*set the empty cells to totalEmptyCells so we can decrement it later */
-            p1->s1->emptyCells = p1->s1->totalEmptyCells;
-            /*now after user selects the difficulty set isStart to 0 because we dont need it anymore*/
-            p1->s1->isStart = 0;
-            /*Forces window for an instant re drawing*/
-            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE);
+        case IDM_NEW_EASY:
+            newGame(p1->s1, p1->g1, 1);
+            break;
+        case IDM_NEW_MEDIUM:
+            newGame(p1->s1, p1->g1, 2);
+            break;
+        case IDM_NEW_HARD:
+            newGame(p1->s1, p1->g1, 3);
+            break;
+        case IDM_EXIT:
+            DestroyWindow(hwnd);
+            return 0;
+        default:
             break;
         }
-
-        /*Get the texbox ID*/
-        HWND textbox = (HWND)lp;
-        // /*Loop through totalEmptyCells */
-        for (int i = 0; i < p1->s1->totalEmptyCells; i++)
-        {
-            if (LOWORD(wp) == i && HIWORD(wp) == EN_CHANGE)
-            {
-                /* Check if user typed a valid input*/
-                if (validateUserInput(hwnd, textbox, i, p1->s1))
-                {
-                    break;
-                }
-            }
-        }
-        break;
+        InvalidateRect(hwnd, NULL, TRUE);
+        return 0;
     }
+
+    case WM_LBUTTONDOWN:
+        onGridClick(hwnd, p1->s1, p1->g1, lp);
+        return 0;
+
+    case WM_KEYDOWN:
+        onKeyPress(hwnd, p1->s1, p1->g1, wp);
+        return 0;
+
+    case WM_DESTROY:
+        deleteFonts(p1->g1);
+        if (p1->g1->menu)
+        {
+            DestroyMenu(p1->g1->menu);
+            p1->g1->menu = NULL;
+        }
+        PostQuitMessage(0);
+        return 0;
 
     default:
-        /*This function ensures that every message is processed*/
         return DefWindowProc(hwnd, msg, wp, lp);
     }
-    return 0;
 }
 
-int main()
+int main(void)
 {
-    srand(time(NULL));
-    struct Game s1 = {};
-    s1.totalEmptyCells = 0;
-    /*Struct needed for user Game Data*/
-    struct Gui g1 = {SUDOKU_GRID_COORDINATES, START_GAME_RECT};
-    /*Pointer struct needed to store Gui & Game so we can pass to callback/WndProc*/
+    srand((unsigned)time(NULL));
+
+    struct Game s1 = {0};
+    struct Gui g1 = {
+        .cell = CELL_SIZE,
+        .gridX0 = GRID_X0,
+        .gridY0 = GRID_Y0,
+    };
     struct PointerStruct p1 = {&s1, &g1};
 
-    generateValidSudoku(0, 0, p1.s1); /* Genreate A Sudoku Grid */
-    /*Formula to find the center of the window*/
-    s1.positions[2] = (g1.Rect.left + g1.Rect.right) / 2 - 4;
-    s1.positions[3] = (g1.Rect.left + g1.Rect.right) / 2 - 12;
-
-    s1.positions[0] = (g1.gridCoordinates.left + g1.gridCoordinates.right) / 2 - 4;
-    s1.positions[1] = (g1.gridCoordinates.top + g1.gridCoordinates.bottom) / 2 - 12;
-
-    /*Indicates that the game is started*/
-    s1.isStart = 1;
-
-    /*Get an hinstance module */
     HINSTANCE hInstance = GetModuleHandle(NULL);
 
-    WNDCLASS class = {};
+    WNDCLASS wc = {0};
+    static const char className[] = "Sudoku";
+    wc.lpszClassName = className;
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInstance;
+    wc.hbrBackground = CreateSolidBrush(COLOR_BG);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 
-    /*Window Class configrations*/
-    char className[] = "Sudoku";
-    class.lpszClassName = className; /*Class Name */
-    class.lpfnWndProc = WndProc;     /*Custom Callback Function*/
-    class.hInstance = hInstance;
-    int rgbColors[3] = mainBackgroundColorRGB; /*Set RGB Value Colors for the window*/
-    class.hbrBackground = CreateSolidBrush(RGB(rgbColors[0], rgbColors[1], rgbColors[2]));
-    class.hCursor = LoadCursor(NULL, IDC_ARROW); /*Used this so it dosent show's a spinning loader when its opens a window */
-
-    /*If window couldn't be registered then show and message and exit*/
-    if (!RegisterClass(&class)) /*Register a Class*/
+    if (!RegisterClass(&wc))
     {
-        MessageBox(NULL, "Window registration failed ", "Error", MB_ICONEXCLAMATION | MB_OK);
+        MessageBox(NULL, "Window registration failed", "Error",
+                   MB_ICONEXCLAMATION | MB_OK);
         return 1;
     }
-    /*Create the Window */
-    HWND hwnd = CreateWindowEx(0, className, "Sudoku App",
-                               WS_OVERLAPPED | WS_SYSMENU | WS_MINIMIZEBOX, 500, 500, 500, 500, NULL,
-                               NULL, hInstance, &p1); /*Pass our struct here*/
-    /*Check if window couldn't be created then show a message and exit*/
+
+    HWND hwnd = CreateWindowEx(0, className, "Sudoku",
+                               WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                               CW_USEDEFAULT, CW_USEDEFAULT, WIN_W, WIN_H,
+                               NULL, NULL, hInstance, &p1);
     if (hwnd == NULL)
     {
-        MessageBox(NULL, "Window creation failed", "Error", MB_ICONEXCLAMATION | MB_OK);
+        MessageBox(NULL, "Window creation failed", "Error",
+                   MB_ICONEXCLAMATION | MB_OK);
         return 1;
     }
-    /*Show the window*/
-    ShowWindow(hwnd, 1);
+
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
 
     MSG msg;
-    /*Message loop to handle window messages*/
-    /*retrieves messages from the message queue and passes it to the callback function/window procedure */
     while (GetMessage(&msg, NULL, 0, 0) > 0)
     {
-        TranslateMessage(&msg); /*Translates Keyboard messages in to characters.Nesscary For user input*/
-        DispatchMessage(&msg);  /*send the message to the window procedure*/
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
-
-    return 0;
+    return (int)msg.wParam;
 }

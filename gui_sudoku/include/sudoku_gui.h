@@ -1,42 +1,56 @@
-#include <stdio.h>
-#include <windows.h>
-#include <time.h>
-#include "../src/config.h"
-
 #ifndef SUDOKU_GUI_H
 #define SUDOKU_GUI_H
 
-/*Struct for user game data*/
+#include <windows.h>
+#include "sudoku.h"
+#include "config.h"
+
+/* Menu command IDs */
+#define IDM_NEW_EASY   101
+#define IDM_NEW_MEDIUM 102
+#define IDM_NEW_HARD   103
+#define IDM_EXIT       104
+
+/* All game/model state lives here. The puzzle (givens) is fixed; the user
+ * fills the rest. `solution` is kept only as a reference and is never used
+ * to judge input. */
 struct Game
 {
-    int totalEmptyCells;
-    int emptyCells;
-    int mistakes;
-    int score;
-    int sudokuGrid[9][9];
-    int zeroGrid[9][9];
-    int isStart;
-    int positions[4];
+    int puzzle[SUDOKU_DIM][SUDOKU_DIM];
+    int user[SUDOKU_DIM][SUDOKU_DIM];
+    int solution[SUDOKU_DIM][SUDOKU_DIM];
+    int level;
+    long score;
+    bool solved;
+    int selRow; /* -1 == nothing selected */
+    int selCol;
 };
 
+/* Presentation-only state. */
 struct Gui
 {
-    RECT gridCoordinates;
-    RECT Rect;
+    int cell;
+    int gridX0;
+    int gridY0;
+    HFONT fontCell;
+    HFONT fontStatus;
+    HMENU menu;
 };
-/*Struct pointer to store to store both Gui and Game Struct*/
+
+/* Bundled so it can be handed to CreateWindowEx / retrieved in WndProc. */
 struct PointerStruct
 {
     struct Game *s1;
     struct Gui *g1;
 };
 
-void drawSudokuGrid(HDC hdc, struct PointerStruct *p1);
-int DisplayUserGameData(HDC hdc, struct PointerStruct *p1);
-int validateUserInput(HWND hwnd, HWND textbox, int currentTextboxID, struct Game *s1);
-void handleDifficultyButtons(int buttonID, HWND *difficultyButtons, struct Game *s1);
-void createDifficultyButtons(HWND hwnd, HWND *difficultyButtons, struct PointerStruct *p1);
-void createSudokuTextbox(HWND hwnd, struct Game *s1);
+void setupMenu(HWND hwnd, struct PointerStruct *p1);
+void createFonts(struct Gui *g1);
+void deleteFonts(struct Gui *g1);
+void newGame(struct Game *s1, struct Gui *g1, int level);
+void drawBoard(HDC hdc, struct Game *s1, struct Gui *g1);
+void drawStatus(HDC hdc, struct Game *s1, struct Gui *g1);
+void onGridClick(HWND hwnd, struct Game *s1, struct Gui *g1, LPARAM lp);
+void onKeyPress(HWND hwnd, struct Game *s1, struct Gui *g1, WPARAM key);
 
 #endif
-
