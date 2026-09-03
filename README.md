@@ -1,5 +1,5 @@
 # Sudoku
-This is a basic beginner Sudoku project made with the C language using Windows API. It
+This is a basic beginner Sudoku project made with the C language using Windows API.
 It has a GUI and you can play Sudoku puzzles with custom difficulty.
 
 # Prerequisites
