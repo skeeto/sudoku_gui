@@ -32,6 +32,7 @@ struct Gui
     int cell;
     int gridX0;
     int gridY0;
+    double scale; /* device-pixels-per-96dpi, from system DPI */
     HFONT fontCell;
     HFONT fontStatus;
     HMENU menu;
@@ -52,5 +53,8 @@ void drawBoard(HDC hdc, struct Game *s1, struct Gui *g1);
 void drawStatus(HDC hdc, struct Game *s1, struct Gui *g1);
 void onGridClick(HWND hwnd, struct Game *s1, struct Gui *g1, LPARAM lp);
 void onKeyPress(HWND hwnd, struct Game *s1, struct Gui *g1, WPARAM key);
+
+void saveGame(const struct Game *s1);
+bool loadGame(struct Game *s1);
 
 #endif

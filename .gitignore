@@ -3,3 +3,6 @@
 *.obj
 *.exe
 gui_sudoku/build/
+
+# Runtime state
+sudoku.save

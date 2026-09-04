@@ -2,6 +2,7 @@
 
 #include "sudoku_gui.h"
 #include "sudoku.h"
+#include "resource.h"
 
 /* Message handler for the single main window. The pointer struct created
  * in main() is attached here so every handler can reach the game + gui. */
@@ -21,14 +22,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         createFonts(pp->g1);
         setupMenu(hwnd, pp);
 
-        HICON hicon = (HICON)LoadImage(NULL, iconFilePath, IMAGE_ICON,
-                                       500, 500, LR_LOADFROMFILE);
+        HICON hicon = LoadIcon(cs->hInstance, MAKEINTRESOURCE(IDI_SUDOKU));
         if (hicon)
         {
             SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hicon);
+            SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hicon);
         }
 
-        newGame(pp->s1, pp->g1, 1); /* start on Easy */
+        /* Auto-resume: restore the last game, else start fresh on Easy. */
+        if (!loadGame(pp->s1))
+        {
+            newGame(pp->s1, pp->g1, 1);
+        }
         return 0;
     }
 
@@ -90,6 +95,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         default:
             break;
         }
+        saveGame(p1->s1);
         InvalidateRect(hwnd, NULL, TRUE);
         return 0;
     }
@@ -103,6 +109,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_DESTROY:
+        saveGame(p1->s1);
         deleteFonts(p1->g1);
         if (p1->g1->menu)
         {
@@ -121,11 +128,18 @@ int main(void)
 {
     srand((unsigned)time(NULL));
 
+    /* Scale everything by the system DPI so the window and its contents are
+       crisp at any display scaling (the manifest marks us DPI-aware). */
+    HDC screen = GetDC(NULL);
+    double scale = GetDeviceCaps(screen, LOGPIXELSX) / 96.0;
+    ReleaseDC(NULL, screen);
+
     struct Game s1 = {0};
     struct Gui g1 = {
-        .cell = CELL_SIZE,
-        .gridX0 = GRID_X0,
-        .gridY0 = GRID_Y0,
+        .cell = (int)(CELL_SIZE * scale + 0.5),
+        .gridX0 = (int)(GRID_X0 * scale + 0.5),
+        .gridY0 = (int)(GRID_Y0 * scale + 0.5),
+        .scale = scale,
     };
     struct PointerStruct p1 = {&s1, &g1};
 
@@ -138,6 +152,7 @@ int main(void)
     wc.hInstance = hInstance;
     wc.hbrBackground = CreateSolidBrush(COLOR_BG);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SUDOKU));
 
     if (!RegisterClass(&wc))
     {
@@ -148,7 +163,8 @@ int main(void)
 
     HWND hwnd = CreateWindowEx(0, className, "Sudoku",
                                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                               CW_USEDEFAULT, CW_USEDEFAULT, WIN_W, WIN_H,
+                               CW_USEDEFAULT, CW_USEDEFAULT,
+                               (int)(WIN_W * scale + 0.5), (int)(WIN_H * scale + 0.5),
                                NULL, NULL, hInstance, &p1);
     if (hwnd == NULL)
     {

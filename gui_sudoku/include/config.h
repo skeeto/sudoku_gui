@@ -18,8 +18,8 @@
 #define LEVEL_LABELS { "Easy", "Medium", "Hard" }
 #define LEVEL_COUNT 3
 
-/* Icon */
-#define iconFilePath "images/sudoku_icon.ico"
+/* Save file (auto-resume) */
+#define saveFilePath "sudoku.save"
 
 /* Palette */
 #define COLOR_BG         RGB(145, 171, 199)
