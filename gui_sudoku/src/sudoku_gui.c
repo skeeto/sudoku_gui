@@ -87,6 +87,10 @@ static void drawPencilDots(HDC hdc, const RECT *cr,
 
 void drawBoard(HDC hdc, struct Game *s1, struct Gui *g1)
 {
+    /* Draw text with a transparent background so each digit sits directly on
+       its cell (no opaque "box" behind it, even on highlighted cells). */
+    SetBkMode(hdc, TRANSPARENT);
+
     int board[SUDOKU_DIM][SUDOKU_DIM];
     computeBoard(s1, board);
     int cell = g1->cell;
