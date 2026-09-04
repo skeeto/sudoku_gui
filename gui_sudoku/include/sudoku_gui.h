@@ -11,6 +11,9 @@
 #define IDM_NEW_HARD   103
 #define IDM_EXIT       104
 
+/* Timer id that drives the once-per-second clock repaint. */
+#define IDT_CLOCK      1
+
 /* All game/model state lives here. The puzzle (givens) is fixed; the user
  * fills the rest. `solution` is kept only as a reference and is never used
  * to judge input. */
@@ -24,6 +27,8 @@ struct Game
     bool solved;
     int selRow; /* -1 == nothing selected */
     int selCol;
+    long start_time; /* epoch seconds when play began; 0 == none */
+    long solved_time; /* epoch seconds when solved; 0 == unsolved */
 };
 
 /* Presentation-only state. */

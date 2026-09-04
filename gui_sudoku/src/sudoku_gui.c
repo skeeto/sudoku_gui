@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "sudoku_gui.h"
 
@@ -97,6 +98,9 @@ void drawBoard(HDC hdc, struct Game *s1, struct Gui *g1)
     FillRect(hdc, &full, bg);
     DeleteObject(bg);
 
+    int selDigit = (s1->selRow >= 0 && s1->selCol >= 0)
+                       ? board[s1->selRow][s1->selCol] : 0;
+
     for (int r = 0; r < SUDOKU_DIM; r++)
     {
         for (int c = 0; c < SUDOKU_DIM; c++)
@@ -104,11 +108,20 @@ void drawBoard(HDC hdc, struct Game *s1, struct Gui *g1)
             RECT cr = { gx + c * cell, gy + r * cell,
                         gx + (c + 1) * cell, gy + (r + 1) * cell };
 
-            if (r == s1->selRow && c == s1->selCol)
+            bool isSel = (r == s1->selRow && c == s1->selCol);
+            bool isPeer = s1->selRow >= 0 &&
+                          (r == s1->selRow || c == s1->selCol ||
+                           (r / 3 == s1->selRow / 3 && c / 3 == s1->selCol / 3));
+            bool isMatch = selDigit > 0 && !isSel && board[r][c] == selDigit;
+
+            COLORREF fill = isSel ? COLOR_SEL_FILL
+                              : isMatch ? COLOR_MATCH_FILL
+                              : isPeer ? COLOR_PEER_FILL : 0;
+            if (fill)
             {
-                HBRUSH sel = CreateSolidBrush(COLOR_SEL_FILL);
-                FillRect(hdc, &cr, sel);
-                DeleteObject(sel);
+                HBRUSH b = CreateSolidBrush(fill);
+                FillRect(hdc, &cr, b);
+                DeleteObject(b);
             }
 
             char buf[4];
@@ -151,6 +164,41 @@ void drawBoard(HDC hdc, struct Game *s1, struct Gui *g1)
     }
 }
 
+/* Elapsed play time in seconds, frozen once the board is solved. */
+static long elapsedSeconds(const struct Game *s1, long now)
+{
+    if (s1->start_time <= 0)
+    {
+        return 0;
+    }
+    long end = s1->solved ? s1->solved_time : now;
+    if (end < s1->start_time)
+    {
+        return 0;
+    }
+    return end - s1->start_time;
+}
+
+/* Write `secs` as MM:SS (or H:MM:SS past one hour) into buf. */
+static void formatTime(long secs, char *buf, int n)
+{
+    if (secs < 0)
+    {
+        secs = 0;
+    }
+    long h = secs / 3600;
+    long m = (secs % 3600) / 60;
+    long s = secs % 60;
+    if (h > 0)
+    {
+        snprintf(buf, (size_t)n, "%ld:%02ld:%02ld", h, m, s);
+    }
+    else
+    {
+        snprintf(buf, (size_t)n, "%02ld:%02ld", m, s);
+    }
+}
+
 void drawStatus(HDC hdc, struct Game *s1, struct Gui *g1)
 {
     SetBkMode(hdc, TRANSPARENT);
@@ -158,15 +206,20 @@ void drawStatus(HDC hdc, struct Game *s1, struct Gui *g1)
     const char *labels[] = LEVEL_LABELS;
     const char *lvl = (s1->level >= 1 && s1->level <= LEVEL_COUNT)
                           ? labels[s1->level - 1] : "";
+    char timeStr[16];
+    formatTime(elapsedSeconds(s1, (long)time(NULL)), timeStr, (int)sizeof(timeStr));
+
     char line[96];
     if (s1->solved)
     {
-        sprintf(line, "Solved!   Score: %ld   (Game > New to play again)", s1->score);
+        sprintf(line, "Solved in %s!   Score: %ld   (Game > New to play again)",
+                timeStr, s1->score);
         SetTextColor(hdc, COLOR_SOLVED);
     }
     else
     {
-        sprintf(line, "Level: %s    Score: %ld    click a cell, type 1-9", lvl, s1->score);
+        sprintf(line, "Level: %s    Time: %s    Score: %ld    click a cell, type 1-9",
+                lvl, timeStr, s1->score);
         SetTextColor(hdc, COLOR_STATUS);
     }
     HFONT old = SelectObject(hdc, g1->fontStatus);
@@ -222,6 +275,8 @@ void newGame(struct Game *s1, struct Gui *g1, int level)
     s1->solved = false;
     s1->selRow = -1;
     s1->selCol = -1;
+    s1->start_time = (long)time(NULL);
+    s1->solved_time = 0;
     for (int r = 0; r < SUDOKU_DIM; r++)
     {
         for (int c = 0; c < SUDOKU_DIM; c++)
@@ -366,7 +421,12 @@ void onKeyPress(HWND hwnd, struct Game *s1, struct Gui *g1, WPARAM key)
     }
 
     s1->user[r][c] = newVal;
+    bool wasSolved = s1->solved;
     s1->solved = boardFullValid(s1);
+    if (s1->solved && !wasSolved)
+    {
+        s1->solved_time = (long)time(NULL);
+    }
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
@@ -378,9 +438,9 @@ void saveGame(const struct Game *s1)
     {
         return;
     }
-    fprintf(f, "sudoku_save 1\n");
-    fprintf(f, "%d %ld %d %d %d\n", s1->level, s1->score, s1->solved,
-            s1->selRow, s1->selCol);
+    fprintf(f, "sudoku_save 2\n");
+    fprintf(f, "%d %ld %d %d %d %ld %ld\n", s1->level, s1->score, s1->solved,
+            s1->selRow, s1->selCol, s1->start_time, s1->solved_time);
     for (int r = 0; r < SUDOKU_DIM; r++)
     {
         for (int c = 0; c < SUDOKU_DIM; c++)
@@ -406,12 +466,14 @@ bool loadGame(struct Game *s1)
     }
     char magic[32] = {0};
     int ver = 0, lvl = 0, solved = 0, selRow = -1, selCol = -1;
-    long score = 0;
+    long score = 0, startTime = 0, solvedTime = 0;
     int pz[SUDOKU_DIM * SUDOKU_DIM];
     int us[SUDOKU_DIM * SUDOKU_DIM];
     bool ok = fscanf(f, "%31s", magic) == 1 && strcmp(magic, "sudoku_save") == 0 &&
-              fscanf(f, "%d", &ver) == 1 && ver == 1 &&
-              fscanf(f, "%d %ld %d %d %d", &lvl, &score, &solved, &selRow, &selCol) == 5;
+              fscanf(f, "%d", &ver) == 1 && ver == 2 &&
+              fscanf(f, "%d %ld %d %d %d %ld %ld",
+                     &lvl, &score, &solved, &selRow, &selCol,
+                     &startTime, &solvedTime) == 7;
     for (int i = 0; i < SUDOKU_DIM * SUDOKU_DIM && ok; i++)
         ok = fscanf(f, "%d", &pz[i]) == 1;
     for (int i = 0; i < SUDOKU_DIM * SUDOKU_DIM && ok; i++)
@@ -437,6 +499,8 @@ bool loadGame(struct Game *s1)
     s1->solved = solved != 0;
     s1->selRow = (selRow >= 0 && selRow < SUDOKU_DIM) ? selRow : -1;
     s1->selCol = (selCol >= 0 && selCol < SUDOKU_DIM) ? selCol : -1;
+    s1->start_time = startTime;
+    s1->solved_time = solvedTime;
     for (int r = 0; r < SUDOKU_DIM; r++)
     {
         for (int c = 0; c < SUDOKU_DIM; c++)

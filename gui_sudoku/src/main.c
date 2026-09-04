@@ -34,6 +34,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         {
             newGame(pp->s1, pp->g1, 1);
         }
+        /* Repaint once per second so the status-line clock advances. */
+        SetTimer(hwnd, IDT_CLOCK, 1000, NULL);
         return 0;
     }
 
@@ -108,8 +110,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         onKeyPress(hwnd, p1->s1, p1->g1, wp);
         return 0;
 
+    case WM_TIMER:
+        if (wp == IDT_CLOCK)
+        {
+            InvalidateRect(hwnd, NULL, TRUE);
+        }
+        return 0;
+
     case WM_DESTROY:
         saveGame(p1->s1);
+        KillTimer(hwnd, IDT_CLOCK);
         deleteFonts(p1->g1);
         if (p1->g1->menu)
         {
