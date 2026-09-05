@@ -216,8 +216,7 @@ void drawStatus(HDC hdc, struct Game *s1, struct Gui *g1)
     char line[96];
     if (s1->solved)
     {
-        sprintf(line, "Solved in %s!   Score: %ld   (Game > New to play again)",
-                timeStr, s1->score);
+        sprintf(line, "Solved in %s!   Score: %ld", timeStr, s1->score);
         SetTextColor(hdc, COLOR_SOLVED);
     }
     else
@@ -229,6 +228,64 @@ void drawStatus(HDC hdc, struct Game *s1, struct Gui *g1)
     HFONT old = SelectObject(hdc, g1->fontStatus);
     RECT sr = { 0, 0, (int)(WIN_W * g1->scale), g1->gridY0 };
     DrawText(hdc, line, -1, &sr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(hdc, old);
+}
+
+/* Celebration shown over the board once it is solved. */
+void drawSolvedOverlay(HDC hdc, struct Game *s1, struct Gui *g1)
+{
+    if (!s1->solved)
+    {
+        return;
+    }
+    int boardL = g1->gridX0;
+    int boardT = g1->gridY0;
+    int boardR = g1->gridX0 + SUDOKU_DIM * g1->cell;
+    int boardB = g1->gridY0 + SUDOKU_DIM * g1->cell;
+    int boardW = boardR - boardL;
+    int boardH = boardB - boardT;
+
+    int panelW = (int)(boardW * 0.72 + 0.5);
+    int panelH = (int)(boardH * 0.34 + 0.5);
+    int pl = (boardL + boardR) / 2 - panelW / 2;
+    int pt = (boardT + boardB) / 2 - panelH / 2;
+    int rad = (int)(panelH * 0.12 + 0.5);
+
+    HBRUSH fill = CreateSolidBrush(COLOR_SOLVED);
+    HPEN pen = CreatePen(PS_SOLID, (int)(2 * g1->scale + 0.5), COLOR_SOLVED_BORDER);
+    HBRUSH oldBrush = SelectObject(hdc, fill);
+    HPEN oldPen = SelectObject(hdc, pen);
+    RoundRect(hdc, pl, pt, pl + panelW, pt + panelH, rad, rad);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(fill);
+    DeleteObject(pen);
+
+    SetBkMode(hdc, TRANSPARENT);
+
+    const char *labels[] = LEVEL_LABELS;
+    const char *lvl = (s1->level >= 1 && s1->level <= LEVEL_COUNT)
+                         ? labels[s1->level - 1] : "";
+    char timeStr[16];
+    formatTime(elapsedSeconds(s1, (long)time(NULL)), timeStr, (int)sizeof(timeStr));
+    char detail[96];
+    sprintf(detail, "%s    Time: %s    Score: %ld", lvl, timeStr, s1->score);
+
+    int pad = (int)(panelW * 0.06 + 0.5);
+    int y1 = pt + (int)(panelH * 0.46);
+    int y2 = pt + (int)(panelH * 0.74);
+    RECT rHead = { pl + pad, pt, pl + panelW - pad, y1 };
+    RECT rDet = { pl + pad, y1, pl + panelW - pad, y2 };
+    RECT rHint = { pl + pad, y2, pl + panelW - pad, pt + panelH };
+
+    HFONT old = SelectObject(hdc, g1->fontWin);
+    SetTextColor(hdc, COLOR_SOLVED_TEXT);
+    DrawText(hdc, "Solved!", -1, &rHead, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(hdc, g1->fontStatus);
+    SetTextColor(hdc, COLOR_GIVEN);
+    DrawText(hdc, detail, -1, &rDet, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SetTextColor(hdc, COLOR_SOLVED_HINT);
+    DrawText(hdc, "Press N for a new game", -1, &rHint, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     SelectObject(hdc, old);
 }
 
@@ -261,6 +318,7 @@ void createFonts(struct Gui *g1)
 {
     g1->fontCell = makeFont((int)(24 * g1->scale + 0.5), FW_BOLD, CELL_FONT);
     g1->fontStatus = makeFont((int)(16 * g1->scale + 0.5), FW_NORMAL, TITLE_FONT);
+    g1->fontWin = makeFont((int)(34 * g1->scale + 0.5), FW_BOLD, CELL_FONT);
 }
 
 void deleteFonts(struct Gui *g1)
@@ -269,6 +327,8 @@ void deleteFonts(struct Gui *g1)
         DeleteObject(g1->fontCell);
     if (g1->fontStatus)
         DeleteObject(g1->fontStatus);
+    if (g1->fontWin)
+        DeleteObject(g1->fontWin);
 }
 
 void newGame(struct Game *s1, struct Gui *g1, int level)
@@ -308,6 +368,10 @@ void newGame(struct Game *s1, struct Gui *g1, int level)
 
 void onGridClick(HWND hwnd, struct Game *s1, struct Gui *g1, LPARAM lp)
 {
+    if (s1->solved)
+    {
+        return; /* board is finished; ignore clicks */
+    }
     int x = LOWORD(lp) - g1->gridX0;
     int y = HIWORD(lp) - g1->gridY0;
     if (x < 0 || y < 0 || x >= SUDOKU_DIM * g1->cell || y >= SUDOKU_DIM * g1->cell)
@@ -324,7 +388,17 @@ void onGridClick(HWND hwnd, struct Game *s1, struct Gui *g1, LPARAM lp)
 
 void onKeyPress(HWND hwnd, struct Game *s1, struct Gui *g1, WPARAM key)
 {
-    (void)g1;
+    if (s1->solved)
+    {
+        /* Board is finished: only a "new game" key does anything. */
+        if (key == 'N' || key == 'n' || key == VK_RETURN || key == VK_SPACE)
+        {
+            newGame(s1, g1, s1->level);
+            saveGame(s1);
+            InvalidateRect(hwnd, NULL, TRUE);
+        }
+        return;
+    }
     int r = s1->selRow;
     int c = s1->selCol;
 
@@ -384,10 +458,6 @@ void onKeyPress(HWND hwnd, struct Game *s1, struct Gui *g1, WPARAM key)
         return;
     }
 
-    if (s1->solved)
-    {
-        return;
-    }
     if (s1->puzzle[r][c] != 0)
     {
         return; /* givens are fixed */

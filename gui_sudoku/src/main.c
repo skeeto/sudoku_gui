@@ -66,6 +66,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
         drawBoard(memDC, p1->s1, p1->g1);
         drawStatus(memDC, p1->s1, p1->g1);
+        drawSolvedOverlay(memDC, p1->s1, p1->g1);
 
         BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
 

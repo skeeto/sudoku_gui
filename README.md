@@ -22,7 +22,9 @@ Sudoku rules (row / column / 3×3 box) rather than a stored answer.
   line or spot a duplicate.
 - **Timer** — elapsed play time is shown in the status line, frozen on a win, and carried
   through auto-resume.
-- **Win detection** — the game is won when the board is full and no rule is violated.
+- **Win detection** — the game is won when the board is full and no rule is violated; a
+  "Solved!" overlay then shows the level, time and score, and **N** (or Enter / Space)
+  starts a fresh game.
 - **Auto-resume** — the current game is saved automatically and restored on the next launch.
 - **High-DPI aware** — the window and all drawing scale with the display's DPI.
 - **Crisp rendering** — double-buffered painting (no flicker) with grayscale
@@ -58,6 +60,7 @@ gcc -I include src/main.c src/sudoku.c src/sudoku_gui.c sudoku_res.o -o main.exe
 - **0 / Backspace / Delete / Space** clears the selected cell.
 - **Arrow keys** move the selection.
 - **Game** menu: start a new puzzle at Easy / Medium / Hard, or Exit.
+- **N / Enter / Space** (once solved) starts a new game at the same level.
 
 ## Testing
 
@@ -73,7 +76,7 @@ The code is split into a dependency-free model and a thin Win32 view:
 | File | Responsibility |
 | --- | --- |
 | `include/sudoku.h` / `src/sudoku.c` | Pure model: board rules, solution counting, and puzzle generation. No Windows types — testable on any platform. |
-| `include/sudoku_gui.h` / `src/sudoku_gui.c` | Presentation: drawing the board (with peer / match highlighting), status line and play timer, pencil dots, fonts, input handling, and save/resume. |
+| `include/sudoku_gui.h` / `src/sudoku_gui.c` | Presentation: drawing the board (with peer / match highlighting), status line and play timer, pencil dots, the "Solved!" overlay, fonts, input handling, and save/resume. |
 | `src/main.c` | Wires the two together: window class, message loop, DPI scaling, and the embedded icon. |
 | `include/config.h` | Layout, colours, fonts, and the save-file path. |
 | `sudoku.rc` / `app.manifest` | Embedded window/EXE icon and the DPI-awareness manifest (compiled with `windres`). |
@@ -86,3 +89,7 @@ Easy (denser givens) and Hard (fewer givens, more pencil-mark dots):
 | Easy | Hard |
 | --- | --- |
 | ![Easy](gui_sudoku/images/sudoku_game.png) | ![Hard](gui_sudoku/images/sudoku_levels.png) |
+
+The "Solved!" overlay, shown when a board is completed:
+
+![Solved](gui_sudoku/images/sudoku_solved.png)

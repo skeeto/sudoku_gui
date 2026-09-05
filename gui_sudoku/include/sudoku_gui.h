@@ -40,6 +40,7 @@ struct Gui
     double scale; /* device-pixels-per-96dpi, from system DPI */
     HFONT fontCell;
     HFONT fontStatus;
+    HFONT fontWin; /* large heading used by the "Solved!" overlay */
     HMENU menu;
 };
 
@@ -56,6 +57,7 @@ void deleteFonts(struct Gui *g1);
 void newGame(struct Game *s1, struct Gui *g1, int level);
 void drawBoard(HDC hdc, struct Game *s1, struct Gui *g1);
 void drawStatus(HDC hdc, struct Game *s1, struct Gui *g1);
+void drawSolvedOverlay(HDC hdc, struct Game *s1, struct Gui *g1);
 void onGridClick(HWND hwnd, struct Game *s1, struct Gui *g1, LPARAM lp);
 void onKeyPress(HWND hwnd, struct Game *s1, struct Gui *g1, WPARAM key);
 
